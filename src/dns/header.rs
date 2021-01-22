@@ -1,7 +1,6 @@
 use super::{Header, ResponseCode, PacketType, OperationCode, Error, ErrorKind};
 use byteorder::{NetworkEndian, ReadBytesExt};
-use std::io::Cursor;
-use crate::helper::get_bit_position;
+use std::{fmt::Display, io::Cursor};
 
 impl Header {
     pub fn new() -> Header {
@@ -11,7 +10,7 @@ impl Header {
             recursion_desired: false,
             authorative: false,
             operation_code: OperationCode::StandardQuery,
-            queury_response: PacketType::Query,
+            packet_type: PacketType::Query,
             response_code: ResponseCode::NOERROR,
             question_count: 0,
             answer_count: 0,
@@ -20,67 +19,44 @@ impl Header {
             truncated: false,
         }
     }
+}
 
-    
+impl Display for Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.packet_type {
+            PacketType::Query if self.question_count == 1 => f.write_fmt(format_args!("Query with {} question", self.question_count))?,
+            PacketType::Query => {
+                match self.question_count {
+                    1 => f.write_fmt(format_args!("Query with {} question", self.question_count))?,
+                    count => f.write_fmt(format_args!("Query with {} questions", count))?,
+                }
+                match self.recursion_desired {
+                    true => f.write_fmt(format_args!("Recursion Desired"))?,
+                    false => f.write_fmt(format_args!(""))?,
+                }
+                f.write_fmt(format_args!("\n"))?;
+            },
+            PacketType::Response if self.answer_count == 1 => f.write_fmt(format_args!("Response with {} answer", self.answer_count))?,
+            PacketType::Response => {
+                match self.question_count {
+                    1 => f.write_fmt(format_args!("Response with {} question", self.question_count))?,
+                    count => f.write_fmt(format_args!("Response with {} questions", count))?,
+                }
+                match self.recursion_desired {
+                    true => f.write_fmt(format_args!("Recursion was requested"))?,
+                    false => f.write_fmt(format_args!(""))?,
+                }
+                f.write_fmt(format_args!("\n"))?;
+                match self.answer_count {
+                    1 => f.write_fmt(format_args!("Response has {} answer", self.answer_count))?,
+                    count => f.write_fmt(format_args!("Response has {} answers", count))?,
+                }
+                f.write_fmt(format_args!("\n"))?;
+            },
+        }
 
-    // Read the header of a DNS packet, requires a cursor for any type that can be turned into a reference to a u8 slice
-    pub fn read_header<'a, P: AsRef<[u8]>>(packet_data: &mut Cursor<P>) -> Result<Header, Error> {
-        // ID 16 bit field
-        let id = packet_data
-            .read_u16::<NetworkEndian>()
-            .map_err(|err| Error::new(ErrorKind::ReadPacketDataFailed, Some(err)))?;
-        // The next byte is made up a bitmask
-        let bitmask = packet_data
-            .read_u16::<NetworkEndian>()
-            .map_err(|err| Error::new(ErrorKind::ReadPacketDataFailed, Some(err)))?;
-        // QR 1 bit field
-        let query_response = PacketType::from(get_bit_position(0, 1, &bitmask));
-        // Op code 4 bit field
-        let op_code = OperationCode::from(get_bit_position(1, 4, &bitmask));
-        // Authoritative 1 bit field
-        let ar: bool = get_bit_position(5, 1, &bitmask) == 1;
-        // Truncation 1 bit field
-        let truncation = get_bit_position(6, 1, &bitmask) == 1;
-        // Recursion Desired 1 bit field
-        let recursion_desired = get_bit_position(7, 1, &bitmask) == 1;
-        // Recursion Available 1 bit field
-        let recursion_available = get_bit_position(8, 1, &bitmask) == 1;
-        // Z Ignore for now 3 bit field
-        let z = get_bit_position(9, 3, &bitmask);
-        // Response Code 4 bit field
-        let response_code = ResponseCode::from(get_bit_position(12, 4, &bitmask));
-        // --
-        // Question Count 16 bit field
-        let question_count = packet_data
-            .read_u16::<NetworkEndian>()
-            .map_err(|err| return Error::new(ErrorKind::ReadPacketDataFailed, Some(err)))?;
-        // AnswerCount 16 bit field
-        let answer_count = packet_data
-            .read_u16::<NetworkEndian>()
-            .map_err(|err| return Error::new(ErrorKind::ReadPacketDataFailed, Some(err)))?;
-        // Resource Count 16 bit field
-        let authority_count = packet_data
-            .read_u16::<NetworkEndian>()
-            .map_err(|err| return Error::new(ErrorKind::ReadPacketDataFailed, Some(err)))?;
-        // Additional Record Count 16 bit field
-        let additional_count = packet_data
-            .read_u16::<NetworkEndian>()
-            .map_err(|err| return Error::new(ErrorKind::ReadPacketDataFailed, Some(err)))?;
-        let header = Header {
-            id,
-            authorative: ar,
-            truncated: truncation,
-            recursion_available,
-            recursion_desired,
-            operation_code: op_code,
-            response_code: response_code,
-            queury_response: query_response,
-            question_count,
-            answer_count,
-            authority_count,
-            additional_count,
-        };
-        Ok(header)
+
+        Ok(())
     }
 }
 

@@ -1,7 +1,7 @@
-use super::{Error, ErrorKind, Question, QuestionClass, QuestionType};
-use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
-use std::{convert::TryFrom, fmt::Display, io::Cursor};
-use std::{fmt::DebugStruct, io::BufReader, io::Write};
+use super::{Question, QuestionClass, QuestionType};
+
+use std::{fmt::Display};
+
 
 impl Display for QuestionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -97,37 +97,53 @@ impl From<u16> for QuestionClass {
     }
 }
 
-impl Question {
-    pub fn read_question<'a, P: AsRef<[u8]>>(
-        packet_data: &mut Cursor<P>,
-    ) -> Result<Question, Error> {
-        let mut names: Vec<String> = Vec::new();
-        loop {
-            let name_size = match packet_data.read_u8().unwrap() {
-                0 => break,
-                name_size => name_size,
-            };
-            let mut name = String::with_capacity(name_size as usize);
-            // The names are a series of names consisting of length|data
-            // The list ends when we encounter a name of zero length
-
-            for index in 0..name_size {
-                let letter = packet_data.read_u8().unwrap();
-                name.push(letter.into());
-            }
-            names.push(name);
-        }
-
-        for name in names.iter() {
-            println!("Question name is: {}", name);
-        }
-        // RR Type field
-        let qtype = packet_data.read_u16::<NetworkEndian>().unwrap();
-        let question_type = QuestionType::from(qtype);
-        println!("Question Type: {}", question_type);
-        let qclass = packet_data.read_u16::<NetworkEndian>().unwrap();
-        let question_class = QuestionClass::from(qclass);
-        println!("Question Type: {}", question_class);
-        Ok(Question {})
-    }
+impl<'a> Question<'a> {
+    // TODO: Reading a question requires access to the global list of domain names
+    // pub fn read_question(
+    //     packet_data: &'a [u8],
+    //     domain_names: &'a mut DomainLabels<'a>,
+    // ) -> Result<Question<'a>, Error> {
+    //     // we pass in the slice that is still left to process rather than the
+    //     let mut domain_name = DomainName::new();
+    //     let mut packet_reader = Cursor::new(packet_data);
+    //     loop {
+    //         // TODO: Verify that it is a length and not an index
+    //         let name_size = match packet_reader.read_u8().unwrap() {
+    //             0 => break,
+    //             // Two highest bits being set mean its an index
+    //             name_size => name_size as usize,
+    //         };
+    //         let pos = packet_reader.position() as usize;
+    //         println!("Pos: {}", pos);
+    //         let byte_slice = &packet_data[1..(1 + name_size)];
+    //         let label_str = match from_utf8(byte_slice) {
+    //             Ok(verified_label) => verified_label,
+    //             // TODO: Should this stop the processing of the packet? Is a packet still valid after an invalid label
+    //             // Note: A valid label can consist of only letters, numbers and a hyphen, starting with a letter and ending with a letter or number
+    //             Err(error) => return Err(Error::new(ErrorKind::InvalidLabel))
+    //         };
+    //         println!("Question label is: {}", label_str);
+    //         // Move to next string
+    //         packet_reader.set_position(packet_reader.position() + name_size as u64);
+            
+    //         let label = domain_names.add_label(label_str, ); //Returns either a reference to a str or a index to a reference to a str
+    //         //domain_names.labels.
+    //         domain_name.add_label(label);
+    //         // The names are a series of names consisting of length|data
+    //         // The list ends when we encounter a name of zero length
+            
+    //         // Is this label already in the index of labels
+            
+            
+    //     }
+    //     // RR Type field
+    //     let qtype = packet_reader.read_u16::<NetworkEndian>().unwrap();
+    //     let question_type = QuestionType::from(qtype);
+    //     println!("Question Type: {}", question_type);
+    //     let qclass = packet_reader.read_u16::<NetworkEndian>().unwrap();
+    //     let question_class = QuestionClass::from(qclass);
+    //     println!("Question Type: {}", question_class);
+        
+    //     Ok(Question {domain_name})
+    // }
 }
