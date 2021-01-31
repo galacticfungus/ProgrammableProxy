@@ -54,8 +54,6 @@ impl Display for Header {
                 f.write_fmt(format_args!("\n"))?;
             },
         }
-
-
         Ok(())
     }
 }

@@ -1,6 +1,6 @@
-use super::{DnsPacket, DnsParser, DomainName, Error, ErrorKind, Header, OperationCode, PacketType, ParsedLabels, PreviousNames, Question, QuestionClass, QuestionType, Resource, ResourceClass, ResourcePayload, ResourceType, ResponseCode};
+use super::{DnsPacket, DnsParser, DomainName, Error, ErrorKind, Header, OperationCode, PacketType, PreviousNames, Question, QuestionClass, QuestionType, Resource, ResourceClass, ResourcePayload, ResourceType, ResponseCode};
 use byteorder::{NetworkEndian, ReadBytesExt};
-use std::{io::Cursor, thread::current};
+use std::{io::Cursor};
 
 impl DnsParser {
     pub fn new() -> DnsParser {
@@ -142,7 +142,7 @@ impl DnsParser {
         println!("Question Type: {}", question_type);
         println!("Question Class: {}", question_class);
         self.position += 4;
-        Ok(Question { domain_name })
+        Ok(Question { domain_name, question_type, question_class })
     }
 
     /// Read a domain name or subset of based on an offset from the start of the packet, returns a Vec of &str so it can be appended to the owning domain name
@@ -351,25 +351,6 @@ impl DnsParser {
         let length_mask = 2u16.pow(bit_length as u32) - 1;
         // The high bits of this value should always be masked out and be zero since no individual value will have more than 7 bits
         (result & length_mask) as u8
-    }
-
-    #[inline]
-    /// Takes a bit position and length and changes the bits to equal the same value set in bits_to_set
-    /// The position is based on RFC 1035 meaning bit position 0 is the right most bit
-    pub fn set_bit_position(position: u8, bit_length: u8, data: &mut u16, bits_to_set: u16) {
-        // To set bit position 1 with data that is 4 bits long
-        // 15 - position
-        // 16 - (1 + 4) = 11 meaning we shift left 11 places to place the start of a 4 bit value at position 1
-        // To set bit position 11 with data that is 2 bits long
-        // 16 - (11 + 2) = 13
-        debug_assert!(position < 16);
-        debug_assert!(bit_length < 16);
-        debug_assert!((position + bit_length) < 16);
-        // TODO: Can we also assert that the provided value will fit in the given bit length
-        // ie (bit_length ^ 2 - 1) = max value that can fit, assert bits_to_set < max value
-        let translated_position = 16 - (position + bit_length);
-        let translated_source = bits_to_set << translated_position;
-        *data |= translated_source;
     }
 }
 

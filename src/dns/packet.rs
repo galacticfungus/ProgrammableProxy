@@ -22,7 +22,7 @@ impl<'a> DnsPacket<'a> {
 
 impl Display for DnsPacket<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self.header);
+        writeln!(f, "{}", self.header)?;
         Ok(())
     }
 }

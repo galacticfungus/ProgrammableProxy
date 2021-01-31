@@ -58,6 +58,17 @@ impl From<u16> for QuestionType {
     }
 }
 
+impl From<QuestionType> for u16 {
+    fn from(question_type: QuestionType) -> Self {
+        match question_type {
+            QuestionType::Address => 1,
+            QuestionType::MailBox => 2,
+            QuestionType::MailGroup => 3,
+            _ => unreachable!("asd"),
+        }
+    }
+}
+
 impl Display for QuestionClass {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

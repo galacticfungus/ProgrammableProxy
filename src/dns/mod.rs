@@ -1,3 +1,5 @@
+use self::builders::DomainNameBuilder;
+
 use super::error::{Error, ErrorKind};
 use std::{
     collections::{HashMap, HashSet},
@@ -7,6 +9,7 @@ use std::{
     sync::atomic,
 };
 
+mod builders;
 mod header;
 mod packet;
 mod parser;
@@ -137,19 +140,22 @@ pub enum OperationCode {
 // Do we use owned versions or do we simply reference into the packet data
 // We also need to support compression
 // This whole thing probably needs a seperate type
+#[derive(Debug, Clone)]
 pub struct Question<'a> {
     domain_name: DomainName<'a>, // This is built from multiple strings
+    question_class: QuestionClass,
+    question_type: QuestionType,
 }
 
-pub struct ParsedLabels<'a> {
-    labels: Vec<&'a str>,
-    positions: Vec<u16>,
-    // So first position is labels[..]
-    // second is [1..]
-    // third is [2..]
-    // last is [k - 1..] where k is len of labels
-    // TODO: Vec<&str> From<ParsedLabels>
-}
+// pub struct ParsedLabels<'a> {
+//     labels: Vec<&'a str>,
+//     positions: Vec<u16>,
+//     // So first position is labels[..]
+//     // second is [1..]
+//     // third is [2..]
+//     // last is [k - 1..] where k is len of labels
+//     // TODO: Vec<&str> From<ParsedLabels>
+// }
 
 // Domain names can have three forms
 // A sequence of labels ending in a zero octet - ie normal
@@ -165,8 +171,91 @@ pub enum DomainName<'a> {
 
 impl<'a> DomainName<'a> {
     pub fn new(labels: Vec<&'a str>) -> DomainName<'a> {
+        // TODO: We can calculate the offset of each label when we create the domain name
         let labels = DomainName::Labels(labels);
         labels
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            DomainName::Labels(labels) => labels.len(),
+            DomainName::LabelVariation(labels) => labels.len(),
+        }
+    }
+
+    pub fn labels(&'a self) -> &'a [&'a str] {
+        match self {
+            DomainName::Labels(labels) => labels.as_slice(),
+            DomainName::LabelVariation(labels) => labels,
+        }
+    }
+
+    pub fn has_suitable_pointer(&self, list_of_names: &[DomainNameBuilder<'a>]) -> Option<(usize, Option<&'a [&'a str]>)> {
+        let labels = self.labels();
+        let mut largest_pointer: Option<(usize, Option<&'a [&'a str]>)> = None;
+        let mut largest_pointer_size = 0;
+        // TODO: It's possible to have multiple matches, ie match on .com and google.com, need to save the best
+        for previous_name in list_of_names {
+            // We look at labels making sure they match until they don't we store the result and move onto the next previous name,
+            // always storing the best result
+            let rev_prev = previous_name.labels().iter().rev();
+            let mut current_pointer_size: usize = 0;
+            let mut current_pointer = None;
+            for (label, (previous_label, previous_position)) in labels.iter().rev().zip(rev_prev) {
+                
+                // TODO: No match means continue
+                // TODO: Match means we record the max amount and position
+                // TODO: We also need to be able to say that some of the labels from labels will need to be written
+                // TODO: So we return Pointer plus labels to write if any,
+                // Option<(usize, Option<&[str]>)>
+                if label == previous_label {
+                    // This is a suitable pointer and that pointer is located at position, position is relative to the position of the previous_name
+                    let pointer = previous_name.position() + *previous_position;
+                    println!(
+                        "New pointer for {} is {} at {}, which is name offset {}",
+                        self,
+                        previous_name,
+                        pointer,
+                        previous_position,
+                    );
+                    let label_bytes = previous_name.labels().iter().map(|(label, _)| label).fold(
+                        Vec::new(),
+                        |mut buffer, bytes| {
+                            let mut byte_vector = Vec::from(bytes.as_bytes());
+                            buffer.append(&mut byte_vector);
+                            buffer
+                        },
+                    );
+                    println!("This points to {:?}", label_bytes);
+                    current_pointer_size += 1;
+                    current_pointer = Some(pointer);
+                    // We found a valid pointer but we don't know that it is the best pointer
+                    
+                } else {
+                    // We break at this point and move to the next domain name
+                    // We make sure to store the best pointer found so far, ie we only overwrite if this result is better than the previous
+                    break;
+                }
+                // TODO: What happens if the zip lengths are uneven - fairly certain it runs until one iterator runs out which in this case is fine
+            }
+            if current_pointer_size > largest_pointer_size {
+                largest_pointer_size = current_pointer_size;
+                largest_pointer = Some((current_pointer.unwrap(), None));
+            }
+            // We
+        }
+        // Here we return the best pointer we found, however we should be able to short circuit the search in a few places based on best 
+        // pointer found and the fact that previous labels are sorted by length
+        // The labels to be included with the pointer are based on the length of the labels that the pointer points to and the number of
+        // labels in the current name
+        // TODO: If largest pointer size < label size then there are additional labels to add
+        // TODO: If they are equal then the name is a duplicate and
+        // largest_pointer_size cannot be greater than labels.len()
+        if largest_pointer_size < labels.len() {
+            println!("Do we have extra labels to add");
+            println!("largest pointer size is {}, labels in name is {}", largest_pointer_size, labels.len());
+        }
+        return largest_pointer;
     }
 }
 
@@ -286,8 +375,6 @@ pub struct DnsPacket<'a> {
     additional: Vec<Resource<'a>>,
 }
 
-
-
 #[derive(Debug, Clone)]
 pub struct Resource<'a> {
     // The contents of a resource is based on its class and its type.
@@ -296,11 +383,33 @@ pub struct Resource<'a> {
     payload: ResourcePayload<'a>,
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_has_suitable_pointer() {
+        // create a domain name that is look to see if it can use a pointer
+        let original_domain_name = DomainName::new(vec!["dev", "google", "com"]);
+        let previous_name = DomainNameBuilder::new(&original_domain_name, 12);
+        let list_of_names = vec![previous_name];
+        let labels = vec!["google", "com"];
+        let google = DomainName::new(labels);
+        let res = google.has_suitable_pointer(list_of_names.as_slice());
+        println!("Result: {:?}", res);
+    }
+
+    #[test]
+    fn test_has_suitable_pointer_same_size() {
+        // create a domain name that is look to see if it can use a pointer
+        let original_domain_name = DomainName::new(vec!["dev", "google", "com"]);
+        let previous_name = DomainNameBuilder::new(&original_domain_name, 12);
+        let list_of_names = vec![previous_name];
+        let labels = vec!["spi", "google", "com"];
+        let google = DomainName::new(labels);
+        let res = google.has_suitable_pointer(list_of_names.as_slice());
+        println!("Result: {:?}", res);
+    }
 
     #[test]
     fn test_read_header() {
@@ -342,13 +451,13 @@ mod tests {
     #[test]
     fn test_get_bit_position() {
         let mut test_value = 0;
-        DnsParser::set_bit_position(0, 2, &mut test_value, 3);
+        // DnsParser::set_bit_position(0, 2, &mut test_value, 3);
         // Two highest bits should be set
         assert_eq!(test_value, 0b1100000000000000u16);
         let data = DnsParser::get_bit_position(0, 2, &test_value);
         assert_eq!(data, 3);
         // 9 from the left not the right
-        DnsParser::set_bit_position(9, 1, &mut test_value, 1);
+        // DnsParser::set_bit_position(9, 1, &mut test_value, 1);
         let test_bool = DnsParser::get_bit_position(9, 1, &test_value) == 1;
         assert!(test_bool);
         println!(
