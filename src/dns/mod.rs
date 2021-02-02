@@ -1,4 +1,4 @@
-use self::builders::DomainNameBuilder;
+use self::builders::{DomainNameBuilder, DomainNamePointer};
 
 use super::error::{Error, ErrorKind};
 use std::{
@@ -190,19 +190,25 @@ impl<'a> DomainName<'a> {
         }
     }
 
-    pub fn has_suitable_pointer(&self, list_of_names: &[DomainNameBuilder<'a>]) -> Option<(usize, Option<&'a [&'a str]>)> {
+    pub fn has_suitable_pointer(
+        &'a self,
+        list_of_names: &[DomainNameBuilder<'a>],
+    ) -> Option<DomainNamePointer<'a>> {
         let labels = self.labels();
-        let mut largest_pointer: Option<(usize, Option<&'a [&'a str]>)> = None;
         let mut largest_pointer_size = 0;
+        let mut largest_pointer = None;
         // TODO: It's possible to have multiple matches, ie match on .com and google.com, need to save the best
+        // TODO: We only need to loop as long as previous_name.len() exceeds largest_pointer_size
         for previous_name in list_of_names {
             // We look at labels making sure they match until they don't we store the result and move onto the next previous name,
             // always storing the best result
             let rev_prev = previous_name.labels().iter().rev();
             let mut current_pointer_size: usize = 0;
             let mut current_pointer = None;
+            // let iter = labels.iter().rev().zip(rev_prev);
+            // while let Some((label, (previous_label, previous_position))) = iter.next() {}
+
             for (label, (previous_label, previous_position)) in labels.iter().rev().zip(rev_prev) {
-                
                 // TODO: No match means continue
                 // TODO: Match means we record the max amount and position
                 // TODO: We also need to be able to say that some of the labels from labels will need to be written
@@ -213,10 +219,7 @@ impl<'a> DomainName<'a> {
                     let pointer = previous_name.position() + *previous_position;
                     println!(
                         "New pointer for {} is {} at {}, which is name offset {}",
-                        self,
-                        previous_name,
-                        pointer,
-                        previous_position,
+                        self, previous_name, pointer, previous_position,
                     );
                     let label_bytes = previous_name.labels().iter().map(|(label, _)| label).fold(
                         Vec::new(),
@@ -229,8 +232,7 @@ impl<'a> DomainName<'a> {
                     println!("This points to {:?}", label_bytes);
                     current_pointer_size += 1;
                     current_pointer = Some(pointer);
-                    // We found a valid pointer but we don't know that it is the best pointer
-                    
+                // We found a valid pointer but we don't know that it is the best pointer
                 } else {
                     // We break at this point and move to the next domain name
                     // We make sure to store the best pointer found so far, ie we only overwrite if this result is better than the previous
@@ -238,24 +240,42 @@ impl<'a> DomainName<'a> {
                 }
                 // TODO: What happens if the zip lengths are uneven - fairly certain it runs until one iterator runs out which in this case is fine
             }
+            // If the current previous label can replace more of the current name then that becomes the largest pointer
             if current_pointer_size > largest_pointer_size {
                 largest_pointer_size = current_pointer_size;
-                largest_pointer = Some((current_pointer.unwrap(), None));
+                largest_pointer = current_pointer;
             }
-            // We
         }
-        // Here we return the best pointer we found, however we should be able to short circuit the search in a few places based on best 
+        if let Some(largest_pointer) = largest_pointer {
+            // TODO: If largest pointer size < label size then there are additional labels to add
+            // TODO: If they are equal then the name is a duplicate and
+            // largest_pointer_size cannot be greater than labels.len() - this would mean the pointer was pointing past the end of the domain name
+            if largest_pointer_size < labels.len() {
+                println!("Do we have extra labels to add");
+                println!(
+                    "largest pointer size is {}, labels in name is {}",
+                    largest_pointer_size,
+                    labels.len()
+                );
+
+                let labels_to_include = &labels[..labels.len() - largest_pointer_size];
+                println!("Labels to include are {:?}", labels_to_include);
+                return Some(DomainNamePointer::LabelsThenPointer(labels_to_include, largest_pointer));
+                //return Some(DomainNamePointer::LabelsThenPointer( , largest_pointer));
+            } else { // largest_pointer_size == labels.len()
+                // Both domain names are the same so we just need to write the pointer and nothing else
+                println!(
+                    "We dont need to include any labels in this pointer"
+                );
+                return Some(DomainNamePointer::Pointer(largest_pointer));
+            }
+        } else {
+            return None;
+        }
+        // Here we return the best pointer we found, however we should be able to short circuit the search in a few places based on best
         // pointer found and the fact that previous labels are sorted by length
         // The labels to be included with the pointer are based on the length of the labels that the pointer points to and the number of
         // labels in the current name
-        // TODO: If largest pointer size < label size then there are additional labels to add
-        // TODO: If they are equal then the name is a duplicate and
-        // largest_pointer_size cannot be greater than labels.len()
-        if largest_pointer_size < labels.len() {
-            println!("Do we have extra labels to add");
-            println!("largest pointer size is {}, labels in name is {}", largest_pointer_size, labels.len());
-        }
-        return largest_pointer;
     }
 }
 
@@ -408,6 +428,22 @@ mod tests {
         let labels = vec!["spi", "google", "com"];
         let google = DomainName::new(labels);
         let res = google.has_suitable_pointer(list_of_names.as_slice());
+        println!("Result: {:?}", res);
+    }
+
+    #[test]
+    fn test_has_suitable_pointer_longer_previous() {
+        // create a domain name that is look to see if it can use a pointer
+        let original_domain_name = DomainName::new(vec!["dev", "break", "com"]);
+        let original_domain_name2 = DomainName::new(vec!["spi", "google", "com"]);
+        let previous_name = DomainNameBuilder::new(&original_domain_name, 12);
+        let previous_name2 = DomainNameBuilder::new(&original_domain_name2, 12+15);
+        let list_of_names = vec![previous_name, previous_name2];
+        let labels = vec!["box", "spi", "google", "com"];
+        let google = DomainName::new(labels);
+        let res = google.has_suitable_pointer(list_of_names.as_slice());
+        let expected = vec!["box"];
+        assert_eq!(res, Some(DomainNamePointer::LabelsThenPointer(expected.as_slice(), 27)));
         println!("Result: {:?}", res);
     }
 

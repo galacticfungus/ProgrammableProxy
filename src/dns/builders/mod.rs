@@ -1,7 +1,7 @@
 use crate::error::{Error, ErrorKind};
-use byteorder::{BigEndian, NetworkEndian, WriteBytesExt};
+use byteorder::{NativeEndian, NetworkEndian, WriteBytesExt};
 use std::{
-    fmt::{write, Display},
+    fmt::Display,
     io::{Cursor, Seek, SeekFrom, Write},
 };
 
@@ -28,6 +28,12 @@ pub struct QuestionBuilder<'a> {
     position: usize,
     question_class: QuestionClass,
     question_type: QuestionType,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum DomainNamePointer<'a> {
+    Pointer(usize),
+    LabelsThenPointer(&'a [&'a str], usize),
 }
 
 pub struct DomainNameBuilder<'a> {
@@ -261,59 +267,131 @@ impl<'a> DnsQueryBuilder<'a> {
         Ok(self)
     }
 
-    pub fn build_query(&mut self) -> [u8; 512] {
+    pub fn build_query(&mut self) -> Result<[u8; 512], Error> {
         // TODO: Ideally when creating these packets we write to an a single section of memory that is just reused as packets are sent
         // TODO: Ie a queue like data structure, where when we free a packet we dont unallocate memory we just mark it as free, does Vec do this?
         // Sort the questions in reverse order
         // Sorting in reverse order allows us to maximise the number of pointers we can create since we can't chain pointers from one domain name to another
+        self.set_question_count()?;
         println!("Before Sorting: {:?}", self.current_questions);
         self.current_questions
             .sort_by(|a, b| b.domain_name.len().cmp(&a.domain_name.len()));
         // Add questions one at a time
         println!("After Sorting: {:?}", self.current_questions);
+        let data_buffer = &mut self.packet_data[..];
+        let mut writer = Cursor::new(data_buffer);
+        // Skip header
+        writer.set_position(12);
         let mut previous_names = Vec::new();
-        let mut total_offset: usize = 12; // Header ends at offset 12
-                                          // TODO: Write Header
-                                          // TODO: Question should probably be replaced with a question builder - We need a domain name that also stores positions for the labels
-                                          // basically the same but only one variation, since we only need to write pointers not follow them
-                                          // We dont know positions until we are building the packet
-        for question in self.current_questions.iter() {
-            // TODO: When writing a question we convert it to a QuestionBuilder and a DomainNameBuilder
-            // First is there a valid label in the previously written domain names that can act as a pointer for this question
-            // question_to_write = question
 
+        for question in self.current_questions.iter() {
             match question
                 .domain_name
                 .has_suitable_pointer(&mut previous_names[..])
             {
-                Some(pointer) => {
+                Some(DomainNamePointer::Pointer(pointer)) => {
                     // Theres two types of pointers here, one that requires preceding labels and one that doesn't
+                    // TODO: Write a u16 with the two high bits set to 1 and the bottom part as pointer
+                    // Set the 2 high bits along with the position of the label
+                    let pointer_to_write = (pointer as u16) | 0b1100000000000000;
+                    println!("Pointer to write: {:016b}", pointer_to_write);
+                    println!("Writing value: {:016b}", pointer_to_write & 0b0011111111111111);
+                    let thing = pointer_to_write & 0b0011111111111111;
+                    println!("Data read as BE {}", u16::from_be(thing));
+                    println!("Data read as LE {}", u16::from_le(thing));
+                    writer
+                        // Here we use the native endian because we have already set up the correct byte order along with setting the 2 high bits
+                        .write_u16::<NetworkEndian>(pointer_to_write)
+                        .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?;
+                    
+                }
+                Some(DomainNamePointer::LabelsThenPointer(labels, pointer)) => {
+                    // Theres two types of pointers here, one that requires preceding labels and one that doesn't
+                    // Set the 2 high bits along with the position of the label
+                    let pointer_to_write = (pointer as u16) | 0b1100000000000000;
+                    println!("Labels then pointer: {:?}, {:016b}", labels, pointer_to_write);
+                    Self::write_labels(labels, &mut writer, Some(pointer_to_write))?;
                 }
                 None => {
-                    /* No Pointer*/
+                    /* No suitable pointer was found*/
                     // Here we save the domain name to the list of names that can be used as pointers
+                    // writer position should always be set to the start of the domain name at this point
+                    let total_offset = writer.position() as usize;
                     let saved_domain = DomainNameBuilder::new(&question.domain_name, total_offset);
+                    let labels = saved_domain
+                        .labels()
+                        .iter()
+                        .map(|(label, _)| *label)
+                        .collect::<Vec<&str>>();
+                    Self::write_labels(labels.as_slice(), &mut writer, None)?;
+                    // for (label, _) in saved_domain.labels() {
+                    //     let label_length = label.len() as u8;
+                    //     writer
+                    //         .write_u8(label_length)
+                    //         .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?;
+                    //     writer
+                    //         .write(label.as_bytes())
+                    //         .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?;
+                    //     total_offset = writer.position() as usize;
+                    // }
+                    // writer
+                    //     .write_u8(0)
+                    //     .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?;
+
                     previous_names.push(saved_domain);
                 }
             }
-            // This can return a pointer to a suffix, a pointer to an exact duplicate and none - this matches up with the types of domain names
-            // TODO: Convert the above to a function that returns a pointer if a viable one was found, so Option<PointerType>
-            // TODO: Can we iterate over value?
 
-            // Need to store the base location of this domain name
-            // TODO: When do we add this - do we add this domain name even if it was added as a pointer? - it seems if we use a pointer then we should avoid using a pointer to a pointer, ie do not save a domain name that used a pointer
+            // Write the question type
+            let question_type = u16::from(question.question_type);
+            writer
+                .write_u16::<NetworkEndian>(question_type)
+                .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?;
+            // Write the question class
+            let question_class = u16::from(question.question_class);
+            writer
+                .write_u16::<NetworkEndian>(question_class)
+                .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?;
         }
-        // When we add a question we check if we have seen parts of the label before
-        // Use a simple byte compare initially rather than computing a hash
-        // When we find a match, we need to check for a complete match
-        // ie given a.b.c and j.a.b.c a matches a, b matches b, c matches c
-        self.packet_data
+
+        Ok(self.packet_data)
+    }
+
+    fn write_labels(
+        labels: &[&str],
+        writer: &mut Cursor<&mut [u8]>,
+        pointer_to_write: Option<u16>,
+    ) -> Result<(), Error> {
+        // TODO: Needs to support writing a set of labels that ends with a pointer as well as just a label?
+        for label in labels {
+            let label_length = label.len() as u8;
+            writer
+                .write_u8(label_length)
+                .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?;
+            writer
+                .write(label.as_bytes())
+                .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?;
+        }
+        // End the name with a zero length label if there is no pointer
+        println!("Pointer to write: {:?}", pointer_to_write);
+        match pointer_to_write {
+            Some(pointer_to_write) => writer
+                .write_u16::<NetworkEndian>(pointer_to_write)
+                .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?,
+            None => writer
+                .write_u8(0)
+                .map_err(|err| Error::new(ErrorKind::WritePacketDataFailed))?,
+        }
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod test_builders {
     use byteorder::{LittleEndian, ReadBytesExt};
+
+    use crate::dns::DnsParser;
 
     use super::*;
 
@@ -329,12 +407,13 @@ mod test_builders {
             .unwrap()
             .request_address("admin.google.com")
             .unwrap()
-            .request_address("aws.com")
-            .unwrap()
-            .request_address("dev.aws.com")
-            .unwrap()
-            .build_query();
+            .build_query()
+            .unwrap();
+        println!("Raw Packet: {:?}", res);
         // let questy = res.build_query();
+        let mut parser = DnsParser::new();
+        let packet = parser.parse_packet(&res[..]).unwrap();
+        println!("Packet: {}", packet);
     }
 
     #[test]

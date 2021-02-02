@@ -1,4 +1,4 @@
-use super::{Header, ResponseCode, PacketType, OperationCode, Error, ErrorKind};
+use super::{Error, ErrorKind, Header, OperationCode, PacketType, ResponseCode};
 use byteorder::{NetworkEndian, ReadBytesExt};
 use std::{fmt::Display, io::Cursor};
 
@@ -24,10 +24,14 @@ impl Header {
 impl Display for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.packet_type {
-            PacketType::Query if self.question_count == 1 => f.write_fmt(format_args!("Query with {} question", self.question_count))?,
+            PacketType::Query if self.question_count == 1 => {
+                f.write_fmt(format_args!("Query with {} question", self.question_count))?
+            }
             PacketType::Query => {
                 match self.question_count {
-                    1 => f.write_fmt(format_args!("Query with {} question", self.question_count))?,
+                    1 => {
+                        f.write_fmt(format_args!("Query with {} question", self.question_count))?
+                    }
                     count => f.write_fmt(format_args!("Query with {} questions", count))?,
                 }
                 match self.recursion_desired {
@@ -35,11 +39,16 @@ impl Display for Header {
                     false => f.write_fmt(format_args!(""))?,
                 }
                 f.write_fmt(format_args!("\n"))?;
-            },
-            PacketType::Response if self.answer_count == 1 => f.write_fmt(format_args!("Response with {} answer", self.answer_count))?,
+            }
+            PacketType::Response if self.answer_count == 1 => {
+                f.write_fmt(format_args!("Response with {} answer", self.answer_count))?
+            }
             PacketType::Response => {
                 match self.question_count {
-                    1 => f.write_fmt(format_args!("Response with {} question", self.question_count))?,
+                    1 => f.write_fmt(format_args!(
+                        "Response with {} question",
+                        self.question_count
+                    ))?,
                     count => f.write_fmt(format_args!("Response with {} questions", count))?,
                 }
                 match self.recursion_desired {
@@ -52,7 +61,7 @@ impl Display for Header {
                     count => f.write_fmt(format_args!("Response has {} answers", count))?,
                 }
                 f.write_fmt(format_args!("\n"))?;
-            },
+            }
         }
         Ok(())
     }
@@ -78,7 +87,6 @@ impl From<u8> for PacketType {
     }
 }
 
-
 impl From<u8> for OperationCode {
     fn from(value: u8) -> Self {
         match value {
@@ -100,8 +108,6 @@ impl From<OperationCode> for u16 {
         }
     }
 }
-
-
 
 impl ResponseCode {}
 

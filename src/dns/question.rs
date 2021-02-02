@@ -1,7 +1,6 @@
 use super::{Question, QuestionClass, QuestionType};
 
-use std::{fmt::Display};
-
+use std::fmt::Display;
 
 impl Display for QuestionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -136,16 +135,15 @@ impl<'a> Question<'a> {
     //         println!("Question label is: {}", label_str);
     //         // Move to next string
     //         packet_reader.set_position(packet_reader.position() + name_size as u64);
-            
+
     //         let label = domain_names.add_label(label_str, ); //Returns either a reference to a str or a index to a reference to a str
     //         //domain_names.labels.
     //         domain_name.add_label(label);
     //         // The names are a series of names consisting of length|data
     //         // The list ends when we encounter a name of zero length
-            
+
     //         // Is this label already in the index of labels
-            
-            
+
     //     }
     //     // RR Type field
     //     let qtype = packet_reader.read_u16::<NetworkEndian>().unwrap();
@@ -154,7 +152,7 @@ impl<'a> Question<'a> {
     //     let qclass = packet_reader.read_u16::<NetworkEndian>().unwrap();
     //     let question_class = QuestionClass::from(qclass);
     //     println!("Question Type: {}", question_class);
-        
+
     //     Ok(Question {domain_name})
     // }
 }

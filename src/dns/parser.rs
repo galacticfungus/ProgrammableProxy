@@ -1,6 +1,10 @@
-use super::{DnsPacket, DnsParser, DomainName, Error, ErrorKind, Header, OperationCode, PacketType, PreviousNames, Question, QuestionClass, QuestionType, Resource, ResourceClass, ResourcePayload, ResourceType, ResponseCode};
+use super::{
+    DnsPacket, DnsParser, DomainName, Error, ErrorKind, Header, OperationCode, PacketType,
+    PreviousNames, Question, QuestionClass, QuestionType, Resource, ResourceClass, ResourcePayload,
+    ResourceType, ResponseCode,
+};
 use byteorder::{NetworkEndian, ReadBytesExt};
-use std::{io::Cursor};
+use std::io::Cursor;
 
 impl DnsParser {
     pub fn new() -> DnsParser {
@@ -73,6 +77,7 @@ impl DnsParser {
         let question_count = reader
             .read_u16::<NetworkEndian>()
             .map_err(|err| return Error::new(ErrorKind::ReadPacketDataFailed))?;
+        println!("{} Questions", question_count);
         // AnswerCount 16 bit field
         let answer_count = reader
             .read_u16::<NetworkEndian>()
@@ -123,6 +128,7 @@ impl DnsParser {
     ) -> Result<Question<'a>, Error> {
         // let label_size = reader.read_u8();
         // DomainName
+        println!("Reading question starting at {}", self.position);
         let current_position = self.position;
         let domain_name = self.read_domain_name(packet_data, domain_labels)?;
         println!("Domain Name: {}", domain_name);
@@ -142,7 +148,11 @@ impl DnsParser {
         println!("Question Type: {}", question_type);
         println!("Question Class: {}", question_class);
         self.position += 4;
-        Ok(Question { domain_name, question_type, question_class })
+        Ok(Question {
+            domain_name,
+            question_type,
+            question_class,
+        })
     }
 
     /// Read a domain name or subset of based on an offset from the start of the packet, returns a Vec of &str so it can be appended to the owning domain name
@@ -179,7 +189,8 @@ impl DnsParser {
                     current_position,
                     current_position + label_length as usize,
                 );
-                let label_slice = &domain_name_slice[current_position..current_position + label_length];
+                let label_slice =
+                    &domain_name_slice[current_position..current_position + label_length];
                 let label = match std::str::from_utf8(label_slice) {
                     Ok(verified_label) => verified_label,
 
@@ -224,7 +235,12 @@ impl DnsParser {
             // If we find a pointer here then this is the last item and can return the domain name directly after processing it
             if packet_data[self.position] & 0b11000000 > 0 {
                 // Read a u16, that is the position of the previous domain label
-
+// if cfg!(target_endian = "big") {
+//     assert_eq!(u16::from_be(n), n)
+// } else {
+//     assert_eq!(u16::from_be(n), n.swap_bytes())
+// }
+                println!("Found a pointer following a list of labels");
                 // TODO: Take the current labels and create a domain of them
                 let mut reader = Cursor::new(&packet_data[self.position..]);
                 // We mask out the 2 highest bits when reading a pointer
@@ -271,7 +287,7 @@ impl DnsParser {
         // Checking for the end of a domain name means we move the position forward one
         self.position += 1;
         let domain_name = DomainName::new(parsed_labels);
-
+        println!("No Pointer Found");
         // Create the slices from the previous positions and labels
         // Check if any labels need to be added to the list of labels mapped to the position
         Ok(domain_name)
@@ -288,12 +304,12 @@ impl DnsParser {
         println!("Name: {}", domain_name);
         println!("Position after name: {}", self.position);
         println!("Packet after name: {:?}", &packet_data[self.position..]);
-        let mut reader = Cursor::new(&packet_data[self.position ..]);
+        let mut reader = Cursor::new(&packet_data[self.position..]);
         // Type
         let resource_type = reader
             .read_u16::<NetworkEndian>()
             .map_err(|err| Error::new(ErrorKind::ReadPacketDataFailed))?;
-            self.position += 2;
+        self.position += 2;
         let rt = ResourceType::from(resource_type);
         println!("Type: {}", rt);
         // CLass
@@ -318,16 +334,16 @@ impl DnsParser {
         let payload = if rs == ResourceClass::Internet {
             match rt {
                 ResourceType::Address => {
-                        let address = &packet_data[self.position..self.position + 4];
-                        println!("Address: {:?}", address);
-                        ResourcePayload::Address(address)
-                    },
+                    let address = &packet_data[self.position..self.position + 4];
+                    println!("Address: {:?}", address);
+                    ResourcePayload::Address(address)
+                }
                 _ => return Err(Error::new(ErrorKind::ReadPacketDataFailed)),
             }
         } else {
             return Err(Error::new(ErrorKind::ReadPacketDataFailed));
         };
-        let resource = Resource { 
+        let resource = Resource {
             resource_name: domain_name,
             time_to_live: ttl,
             payload,
@@ -391,13 +407,14 @@ mod tests {
         // Position at the end of the header, as we know there is one question
         parser.position = 12;
         let mut domain_names = PreviousNames::new();
-        let domain_name = parser.read_domain_name(packet_data, &mut domain_names).unwrap();
+        let domain_name = parser
+            .read_domain_name(packet_data, &mut domain_names)
+            .unwrap();
         let domain_labels = match domain_name {
             DomainName::Labels(labels) => labels,
             _ => panic!("Invalid domain name"),
         };
-        assert_eq!(domain_labels, vec!["google","com"]);
-        
+        assert_eq!(domain_labels, vec!["google", "com"]);
     }
 
     #[test]
@@ -416,6 +433,6 @@ mod tests {
         // Position at the end of the question, as we know there is one answer
         // parser.position = 12;
         let domain_labels = parser.read_domain_name_pointer(packet_data, 12).unwrap();
-        assert_eq!(domain_labels, vec!["google","com"]);
+        assert_eq!(domain_labels, vec!["google", "com"]);
     }
 }

@@ -1,7 +1,7 @@
-use std::io::Cursor;
+use super::{DnsPacket, Error, ErrorKind, Header, RawPacket};
+use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use std::convert::TryFrom;
-use byteorder::{NetworkEndian, WriteBytesExt, ReadBytesExt};
-use super::{Error, ErrorKind, RawPacket, Header, DnsPacket};
+use std::io::Cursor;
 
 // TODO: Track previously recorded domain names
 

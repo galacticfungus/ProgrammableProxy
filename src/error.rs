@@ -12,7 +12,7 @@ pub struct Error {
 
 impl Error {
     pub fn new(kind: ErrorKind) -> Error {
-        Error { kind}
+        Error { kind }
     }
 }
 
